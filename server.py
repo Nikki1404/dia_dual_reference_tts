@@ -14,8 +14,19 @@ import numpy as np
 import soundfile as sf
 import torch
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
+
+from fastapi.responses import (
+    Response,
+    StreamingResponse,
+)
+
 from pydantic import BaseModel, Field
 from scipy.signal import resample_poly
 from transformers import AutoProcessor, DiaForConditionalGeneration
@@ -30,7 +41,11 @@ MODEL_ID = os.getenv(
     "nari-labs/Dia-1.6B-0626",
 )
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
 
 DTYPE = (
     torch.float16
@@ -40,24 +55,93 @@ DTYPE = (
 
 SAMPLE_RATE = 44100
 
-DEFAULT_PRODUCTION_MAX_NEW_TOKENS = 3072
-DEFAULT_SEED_MAX_NEW_TOKENS = 1024
 
-REFERENCE_SILENCE_MS = 180
+DEFAULT_PRODUCTION_MAX_NEW_TOKENS = int(
+    os.getenv(
+        "DEFAULT_PRODUCTION_MAX_NEW_TOKENS",
+        "3072",
+    )
+)
+
+DEFAULT_SEED_MAX_NEW_TOKENS = int(
+    os.getenv(
+        "DEFAULT_SEED_MAX_NEW_TOKENS",
+        "1024",
+    )
+)
+
+REFERENCE_SILENCE_MS = int(
+    os.getenv(
+        "REFERENCE_SILENCE_MS",
+        "180",
+    )
+)
 
 
-# Production: less random
-PRODUCTION_GUIDANCE_SCALE = 3.0
-PRODUCTION_TEMPERATURE = 1.0
-PRODUCTION_TOP_P = 0.95
-PRODUCTION_TOP_K = 50
+# =============================================================================
+# PRODUCTION GENERATION
+# =============================================================================
+
+PRODUCTION_GUIDANCE_SCALE = float(
+    os.getenv(
+        "PRODUCTION_GUIDANCE_SCALE",
+        "3.0",
+    )
+)
+
+PRODUCTION_TEMPERATURE = float(
+    os.getenv(
+        "PRODUCTION_TEMPERATURE",
+        "1.0",
+    )
+)
+
+PRODUCTION_TOP_P = float(
+    os.getenv(
+        "PRODUCTION_TOP_P",
+        "0.95",
+    )
+)
+
+PRODUCTION_TOP_K = int(
+    os.getenv(
+        "PRODUCTION_TOP_K",
+        "50",
+    )
+)
 
 
-# Seed auditioning
-SEED_GUIDANCE_SCALE = 3.0
-SEED_TEMPERATURE = 1.8
-SEED_TOP_P = 0.90
-SEED_TOP_K = 45
+# =============================================================================
+# SEED MODE GENERATION
+# =============================================================================
+
+SEED_GUIDANCE_SCALE = float(
+    os.getenv(
+        "SEED_GUIDANCE_SCALE",
+        "3.0",
+    )
+)
+
+SEED_TEMPERATURE = float(
+    os.getenv(
+        "SEED_TEMPERATURE",
+        "1.8",
+    )
+)
+
+SEED_TOP_P = float(
+    os.getenv(
+        "SEED_TOP_P",
+        "0.90",
+    )
+)
+
+SEED_TOP_K = int(
+    os.getenv(
+        "SEED_TOP_K",
+        "45",
+    )
+)
 
 
 # =============================================================================
@@ -66,7 +150,7 @@ SEED_TOP_K = 45
 
 app = FastAPI(
     title="Dia Speaker-Wise Dual Reference TTS",
-    version="3.0.0",
+    version="4.0.0",
 )
 
 processor = None
@@ -99,7 +183,7 @@ class SeedTTSRequest(BaseModel):
 
 
 # =============================================================================
-# CUDA / SEED
+# CUDA / RNG
 # =============================================================================
 
 def sync_cuda():
@@ -126,7 +210,7 @@ def set_seed(seed: int):
 
 
 # =============================================================================
-# TEXT
+# TEXT HELPERS
 # =============================================================================
 
 def normalize_tags(text: str):
@@ -174,9 +258,17 @@ def strip_leading_tag(
 # =============================================================================
 # SPEAKER-WISE PARSER
 #
-# One complete [S1] or [S2] turn = one chunk.
+# One complete speaker turn = one generation chunk.
 #
-# Works even without newline:
+# [S1] = agent
+# [S2] = customer
+#
+# Works with:
+#
+# [S1] hello.
+# [S2] hi.
+#
+# and:
 #
 # [S1] hello.[S2] hi.[S1] next...
 # =============================================================================
@@ -196,30 +288,41 @@ def parse_turns(text: str):
     if not matches:
 
         raise ValueError(
-            "Transcript must contain [S1] or [S2]."
+            "Transcript must contain [S1] and/or [S2] tags."
         )
 
     turns = []
 
     for index, match in enumerate(matches):
 
-        speaker = match.group(1).upper()
+        speaker = (
+            match.group(1)
+            .upper()
+        )
 
-        start = match.end()
+        start = (
+            match.end()
+        )
 
         if index + 1 < len(matches):
 
-            end = matches[
-                index + 1
-            ].start()
+            end = (
+                matches[
+                    index + 1
+                ]
+                .start()
+            )
 
         else:
 
             end = len(text)
 
-        speech = text[
-            start:end
-        ].strip()
+        speech = (
+            text[
+                start:end
+            ]
+            .strip()
+        )
 
         if speech:
 
@@ -242,14 +345,14 @@ def parse_turns(text: str):
 # =============================================================================
 # TOKEN PROTECTION
 #
-# Helps:
+# Prevents very short text from immediately ending.
+#
+# Examples:
 #
 # Hello.
 # Yes.
 # English please.
 # My member ID is 2043.
-#
-# and reduces early EOS for final words.
 # =============================================================================
 
 def generation_limits(
@@ -257,17 +360,14 @@ def generation_limits(
     requested_max: int,
 ):
 
-    words = len(
-        speech.split()
-    )
-
-    words = max(
-        words,
+    word_count = max(
         1,
+        len(
+            speech.split()
+        ),
     )
 
-
-    if words == 1:
+    if word_count == 1:
 
         min_tokens = 128
 
@@ -276,8 +376,7 @@ def generation_limits(
             512,
         )
 
-
-    elif words <= 3:
+    elif word_count <= 3:
 
         min_tokens = 160
 
@@ -286,8 +385,7 @@ def generation_limits(
             640,
         )
 
-
-    elif words <= 6:
+    elif word_count <= 6:
 
         min_tokens = 192
 
@@ -296,8 +394,7 @@ def generation_limits(
             768,
         )
 
-
-    elif words <= 12:
+    elif word_count <= 12:
 
         min_tokens = 256
 
@@ -306,8 +403,7 @@ def generation_limits(
             1280,
         )
 
-
-    elif words <= 20:
+    elif word_count <= 20:
 
         min_tokens = 384
 
@@ -316,8 +412,7 @@ def generation_limits(
             1792,
         )
 
-
-    elif words <= 30:
+    elif word_count <= 30:
 
         min_tokens = 512
 
@@ -326,11 +421,11 @@ def generation_limits(
             2304,
         )
 
-
     else:
 
         estimated_seconds = (
-            words / 2.8
+            word_count
+            / 2.8
         )
 
         estimated_tokens = int(
@@ -353,7 +448,6 @@ def generation_limits(
             requested_max
         )
 
-
     if min_tokens >= local_max:
 
         min_tokens = max(
@@ -361,45 +455,53 @@ def generation_limits(
             local_max - 32,
         )
 
-
     return (
         min_tokens,
         local_max,
     )
 
 
+# =============================================================================
+# OBVIOUSLY-TOO-SHORT DETECTION
+#
+# This does NOT verify transcript accuracy.
+# It only catches outputs that are clearly too short.
+# =============================================================================
+
 def minimum_reasonable_duration(
     speech: str,
 ):
 
-    words = max(
+    word_count = max(
         1,
         len(
             speech.split()
         ),
     )
 
-    if words == 1:
+    if word_count == 1:
+
         return 0.30
 
-    if words <= 3:
+    if word_count <= 3:
+
         return 0.50
 
     return max(
         0.65,
-        words / 5.2,
+        word_count / 5.2,
     )
 
 
 # =============================================================================
-# AUDIO
+# REFERENCE AUDIO
 # =============================================================================
 
 def read_reference_wav(
     wav_bytes: bytes,
 ):
 
-    audio, sr = sf.read(
+    audio, sample_rate = sf.read(
         io.BytesIO(
             wav_bytes
         ),
@@ -413,12 +515,10 @@ def read_reference_wav(
             axis=1,
         )
 
-
     audio = np.asarray(
         audio,
         dtype=np.float32,
     )
-
 
     if len(audio) == 0:
 
@@ -426,22 +526,20 @@ def read_reference_wav(
             "Reference WAV is empty."
         )
 
-
-    if sr != SAMPLE_RATE:
+    if sample_rate != SAMPLE_RATE:
 
         divisor = gcd(
-            sr,
+            sample_rate,
             SAMPLE_RATE,
         )
 
         audio = resample_poly(
             audio,
             SAMPLE_RATE // divisor,
-            sr // divisor,
+            sample_rate // divisor,
         ).astype(
             np.float32
         )
-
 
     return audio
 
@@ -456,29 +554,25 @@ def trim_reference_silence(
 
         return audio
 
-
     peak = float(
         np.max(
             np.abs(audio)
         )
     )
 
-
     if peak <= 0:
 
         return audio
 
-
     active = np.flatnonzero(
         np.abs(audio)
-        >= peak * threshold_ratio
+        >= peak
+        * threshold_ratio
     )
-
 
     if len(active) == 0:
 
         return audio
-
 
     padding = int(
         SAMPLE_RATE
@@ -486,13 +580,11 @@ def trim_reference_silence(
         / 1000
     )
 
-
     start = max(
         0,
         int(active[0])
         - padding,
     )
-
 
     end = min(
         len(audio),
@@ -500,7 +592,6 @@ def trim_reference_silence(
         + padding
         + 1,
     )
-
 
     return audio[
         start:end
@@ -524,7 +615,6 @@ def combine_references(
         )
     )
 
-
     silence = np.zeros(
         int(
             SAMPLE_RATE
@@ -533,7 +623,6 @@ def combine_references(
         ),
         dtype=np.float32,
     )
-
 
     return np.concatenate(
         [
@@ -555,21 +644,25 @@ def decode_conditioned(
     prompt_len,
 ):
 
-    decoded = processor.batch_decode(
-        outputs,
-        audio_prompt_len=prompt_len,
+    decoded = (
+        processor.batch_decode(
+            outputs,
+            audio_prompt_len=
+                prompt_len,
+        )
     )
-
 
     audio = (
         decoded[0]
         if isinstance(
             decoded,
-            (list, tuple),
+            (
+                list,
+                tuple,
+            ),
         )
         else decoded
     )
-
 
     if torch.is_tensor(audio):
 
@@ -580,7 +673,6 @@ def decode_conditioned(
             .cpu()
             .numpy()
         )
-
 
     audio = np.squeeze(
         np.asarray(
@@ -589,13 +681,12 @@ def decode_conditioned(
         )
     )
 
-
     if audio.ndim != 1:
 
         raise RuntimeError(
-            f"Unexpected audio shape: {audio.shape}"
+            f"Unexpected audio shape: "
+            f"{audio.shape}"
         )
-
 
     if len(audio) == 0:
 
@@ -603,26 +694,38 @@ def decode_conditioned(
             "Generated audio is empty."
         )
 
+    if not np.all(
+        np.isfinite(audio)
+    ):
+
+        raise RuntimeError(
+            "Generated audio contains NaN/Inf."
+        )
 
     return audio
 
 
-def decode_plain(outputs):
+def decode_plain(
+    outputs,
+):
 
-    decoded = processor.batch_decode(
-        outputs
+    decoded = (
+        processor.batch_decode(
+            outputs
+        )
     )
-
 
     audio = (
         decoded[0]
         if isinstance(
             decoded,
-            (list, tuple),
+            (
+                list,
+                tuple,
+            ),
         )
         else decoded
     )
-
 
     if torch.is_tensor(audio):
 
@@ -634,17 +737,25 @@ def decode_plain(outputs):
             .numpy()
         )
 
-
-    return np.squeeze(
+    audio = np.squeeze(
         np.asarray(
             audio,
             dtype=np.float32,
         )
     )
 
+    if audio.ndim != 1:
+
+        raise RuntimeError(
+            f"Unexpected audio shape: "
+            f"{audio.shape}"
+        )
+
+    return audio
+
 
 # =============================================================================
-# STREAM
+# STREAM FRAME
 # =============================================================================
 
 def make_frame(
@@ -652,12 +763,14 @@ def make_frame(
     pcm=b"",
 ):
 
-    metadata_bytes = json.dumps(
-        metadata
-    ).encode(
-        "utf-8"
+    metadata_bytes = (
+        json.dumps(
+            metadata
+        )
+        .encode(
+            "utf-8"
+        )
     )
-
 
     return (
         struct.pack(
@@ -687,32 +800,35 @@ def load_model():
     global model
     global model_load_ms
 
-
     print("")
     print("=" * 80)
-    print("DIA TTS STARTUP")
+    print("DIA SPEAKER-WISE TTS STARTUP")
     print("=" * 80)
 
     print(
-        f"Model             : {MODEL_ID}"
+        f"Model             : "
+        f"{MODEL_ID}"
     )
 
     print(
-        f"Device            : {DEVICE}"
+        f"Device            : "
+        f"{DEVICE}"
     )
 
     print(
-        f"PyTorch           : {torch.__version__}"
+        f"PyTorch           : "
+        f"{torch.__version__}"
     )
 
     print(
-        f"PyTorch CUDA      : {torch.version.cuda}"
+        f"PyTorch CUDA      : "
+        f"{torch.version.cuda}"
     )
 
     print(
-        f"CUDA available    : {torch.cuda.is_available()}"
+        f"CUDA available    : "
+        f"{torch.cuda.is_available()}"
     )
-
 
     if torch.cuda.is_available():
 
@@ -721,9 +837,9 @@ def load_model():
             f"{torch.cuda.get_device_name(0)}"
         )
 
-
     print(
-        "Chunk mode        : complete speaker turn"
+        "Chunk mode        : "
+        "complete speaker turn"
     )
 
     print(
@@ -731,16 +847,14 @@ def load_model():
     )
 
     print(
-        "Retry guard       : enabled"
+        "Early-EOS retry   : enabled"
     )
 
     print("=" * 80)
 
-
-    start = (
+    started = (
         time.perf_counter_ns()
     )
-
 
     processor = (
         AutoProcessor
@@ -749,7 +863,6 @@ def load_model():
         )
     )
 
-
     model = (
         DiaForConditionalGeneration
         .from_pretrained(
@@ -757,24 +870,19 @@ def load_model():
         )
     )
 
-
     model = model.to(
         device=DEVICE,
         dtype=DTYPE,
     )
 
-
     model.eval()
-
 
     sync_cuda()
 
-
     model_load_ms = (
         time.perf_counter_ns()
-        - start
+        - started
     ) / 1_000_000
-
 
     print(
         f"Model loaded      : "
@@ -811,7 +919,7 @@ def health():
         "short_text_guard":
             True,
 
-        "retry_guard":
+        "early_eos_retry":
             True,
 
         "endpoints": {
@@ -826,7 +934,7 @@ def health():
 
 
 # =============================================================================
-# GENERATE ONE TURN
+# GENERATE ONE SPEAKER TURN
 # =============================================================================
 
 def generate_one_turn(
@@ -844,18 +952,15 @@ def generate_one_turn(
         requested_max,
     )
 
-
     min_duration = (
         minimum_reasonable_duration(
             speech
         )
     )
 
-
     preprocess_start = (
         time.perf_counter_ns()
     )
-
 
     inputs = processor(
         text=[
@@ -869,7 +974,6 @@ def generate_one_turn(
         model.device
     )
 
-
     prompt_len = (
         processor
         .get_audio_prompt_len(
@@ -879,20 +983,16 @@ def generate_one_turn(
         )
     )
 
-
     sync_cuda()
-
 
     preprocess_ms = (
         time.perf_counter_ns()
         - preprocess_start
     ) / 1_000_000
 
-
     inference_start = (
         time.perf_counter_ns()
     )
-
 
     with torch.inference_mode():
 
@@ -918,56 +1018,47 @@ def generate_one_turn(
                 PRODUCTION_TOP_K,
         )
 
-
     sync_cuda()
-
 
     inference_ms = (
         time.perf_counter_ns()
         - inference_start
     ) / 1_000_000
 
-
     decode_start = (
         time.perf_counter_ns()
     )
-
 
     audio = decode_conditioned(
         outputs,
         prompt_len,
     )
 
-
     decode_ms = (
         time.perf_counter_ns()
         - decode_start
     ) / 1_000_000
-
 
     duration = (
         len(audio)
         / SAMPLE_RATE
     )
 
-
     retried = False
 
 
     # =========================================================================
-    # RETRY IF CLEARLY TRUNCATED
+    # RETRY ON CLEARLY TOO-SHORT OUTPUT
     # =========================================================================
 
     if duration < min_duration:
 
         retried = True
 
-
         print(
-            "[WARN] Short output detected. "
-            "Retrying turn once."
+            "[WARN] Output shorter than expected. "
+            "Retrying once."
         )
-
 
         stronger_min = min(
             local_max - 16,
@@ -982,77 +1073,78 @@ def generate_one_turn(
             ),
         )
 
-
         retry_start = (
             time.perf_counter_ns()
         )
 
-
         with torch.inference_mode():
 
-            retry_outputs = model.generate(
-                **inputs,
+            retry_outputs = (
+                model.generate(
+                    **inputs,
 
-                min_new_tokens=
-                    stronger_min,
+                    min_new_tokens=
+                        stronger_min,
 
-                max_new_tokens=
-                    local_max,
+                    max_new_tokens=
+                        local_max,
 
-                guidance_scale=
-                    PRODUCTION_GUIDANCE_SCALE,
+                    guidance_scale=
+                        PRODUCTION_GUIDANCE_SCALE,
 
-                temperature=
-                    0.8,
+                    temperature=
+                        0.8,
 
-                top_p=
-                    0.95,
+                    top_p=
+                        0.95,
 
-                top_k=
-                    50,
+                    top_k=
+                        50,
+                )
             )
 
-
         sync_cuda()
-
 
         retry_inference_ms = (
             time.perf_counter_ns()
             - retry_start
         ) / 1_000_000
 
-
         retry_decode_start = (
             time.perf_counter_ns()
         )
 
-
-        retry_audio = decode_conditioned(
-            retry_outputs,
-            prompt_len,
+        retry_audio = (
+            decode_conditioned(
+                retry_outputs,
+                prompt_len,
+            )
         )
-
 
         retry_decode_ms = (
             time.perf_counter_ns()
             - retry_decode_start
         ) / 1_000_000
 
-
         retry_duration = (
             len(retry_audio)
             / SAMPLE_RATE
         )
 
+        print(
+            f"Retry duration    : "
+            f"{retry_duration:.2f}s"
+        )
 
         if retry_duration > duration:
 
-            audio = retry_audio
+            audio = (
+                retry_audio
+            )
 
             duration = (
                 retry_duration
             )
-
 
         inference_ms += (
             retry_inference_ms
@@ -1061,7 +1153,6 @@ def generate_one_turn(
         decode_ms += (
             retry_decode_ms
         )
-
 
     return (
         audio,
@@ -1092,16 +1183,15 @@ def production_generator(
         time.perf_counter_ns()
     )
 
-
     turns = parse_turns(
         text
     )
 
 
     # =========================================================================
-    # AGENT REFERENCE
+    # AGENT
     #
-    # internal S1 = agent
+    # Internal S1 = agent
     # =========================================================================
 
     agent_ref_audio = (
@@ -1111,7 +1201,6 @@ def production_generator(
         )
     )
 
-
     agent_ref_text = (
         f"[S1] {agent_text} "
         f"[S2] {customer_text}"
@@ -1119,9 +1208,9 @@ def production_generator(
 
 
     # =========================================================================
-    # CUSTOMER REFERENCE
+    # CUSTOMER
     #
-    # internal S1 = customer
+    # Internal S1 = customer
     # =========================================================================
 
     customer_ref_audio = (
@@ -1130,7 +1219,6 @@ def production_generator(
             agent_audio,
         )
     )
-
 
     customer_ref_text = (
         f"[S1] {customer_text} "
@@ -1144,11 +1232,18 @@ def production_generator(
     print("=" * 80)
 
     print(
-        f"Turns             : {len(turns)}"
+        f"Request ID        : "
+        f"{request_id}"
     )
 
     print(
-        f"Max new tokens    : {max_new_tokens}"
+        f"Turns             : "
+        f"{len(turns)}"
+    )
+
+    print(
+        f"Max new tokens    : "
+        f"{max_new_tokens}"
     )
 
     print("=" * 80)
@@ -1173,7 +1268,6 @@ def production_generator(
         start=1,
     ):
 
-
         if speaker == "S1":
 
             voice = "agent"
@@ -1185,7 +1279,6 @@ def production_generator(
             ref_text = (
                 agent_ref_text
             )
-
 
         else:
 
@@ -1200,15 +1293,14 @@ def production_generator(
             )
 
 
-        # Target always internal S1
-        target = (
+        # Target is always internal S1.
+        target_text = (
             f"[S1] {speech}"
         )
 
-
-        conditioned = (
+        conditioned_text = (
             f"{ref_text} "
-            f"{target}"
+            f"{target_text}"
         )
 
 
@@ -1216,12 +1308,18 @@ def production_generator(
         print("-" * 80)
 
         print(
-            f"Chunk {index}/{len(turns)}"
+            f"Chunk "
+            f"{index}/{len(turns)}"
         )
 
         print(
             f"Speaker           : "
             f"{speaker} ({voice})"
+        )
+
+        print(
+            f"Words             : "
+            f"{len(speech.split())}"
         )
 
         print(
@@ -1239,10 +1337,17 @@ def production_generator(
             local_max,
             retried,
         ) = generate_one_turn(
-            conditioned,
-            ref_audio,
-            speech,
-            max_new_tokens,
+            conditioned_text=
+                conditioned_text,
+
+            reference_audio=
+                ref_audio,
+
+            speech=
+                speech,
+
+            requested_max=
+                max_new_tokens,
         )
 
 
@@ -1281,11 +1386,35 @@ def production_generator(
         )
 
 
+        print(
+            f"Min new tokens    : "
+            f"{min_tokens}"
+        )
+
+        print(
+            f"Local max tokens  : "
+            f"{local_max}"
+        )
+
+        print(
+            f"Audio duration    : "
+            f"{duration:.2f}s"
+        )
+
+        print(
+            f"Retry used        : "
+            f"{retried}"
+        )
+
+
         yield make_frame(
             {
 
                 "type":
                     "audio",
+
+                "request_id":
+                    request_id,
 
                 "chunk_index":
                     index,
@@ -1335,7 +1464,6 @@ def production_generator(
         - start
     ) / 1_000_000
 
-
     audio_duration = (
         total_samples
         / SAMPLE_RATE
@@ -1347,6 +1475,9 @@ def production_generator(
 
             "type":
                 "end",
+
+            "request_id":
+                request_id,
 
             "chunk_count":
                 len(turns),
@@ -1397,7 +1528,6 @@ def production_generator(
                     / 1024**2
 
                     if torch.cuda.is_available()
-
                     else 0
                 ),
         }
@@ -1431,28 +1561,40 @@ def tts(
         UploadFile = File(...),
 ):
 
+    if (
+        model is None
+        or processor is None
+    ):
+
+        raise HTTPException(
+            status_code=503,
+            detail="Model is not loaded yet.",
+        )
+
+    if not (
+        256
+        <= max_new_tokens
+        <= 4096
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "max_new_tokens must be between "
+                "256 and 4096."
+            ),
+        )
+
 
     try:
 
-        agent_bytes = (
-            agent_audio.file.read()
+        text = normalize_tags(
+            text
         )
 
-        customer_bytes = (
-            customer_audio.file.read()
-        )
-
-
-        agent_array = (
-            read_reference_wav(
-                agent_bytes
-            )
-        )
-
-        customer_array = (
-            read_reference_wav(
-                customer_bytes
-            )
+        # Validate.
+        parse_turns(
+            text
         )
 
 
@@ -1472,6 +1614,48 @@ def tts(
         )
 
 
+        agent_bytes = (
+            agent_audio
+            .file
+            .read()
+        )
+
+
+        customer_bytes = (
+            customer_audio
+            .file
+            .read()
+        )
+
+
+        if not agent_bytes:
+
+            raise ValueError(
+                "Agent reference WAV is empty."
+            )
+
+
+        if not customer_bytes:
+
+            raise ValueError(
+                "Customer reference WAV is empty."
+            )
+
+
+        agent_array = (
+            read_reference_wav(
+                agent_bytes
+            )
+        )
+
+
+        customer_array = (
+            read_reference_wav(
+                customer_bytes
+            )
+        )
+
+
         request_id = str(
             uuid.uuid4()
         )
@@ -1481,23 +1665,42 @@ def tts(
 
             production_generator(
 
-                normalize_tags(text),
+                text=
+                    text,
 
-                agent_text,
+                agent_text=
+                    agent_text,
 
-                customer_text,
+                customer_text=
+                    customer_text,
 
-                agent_array,
+                agent_audio=
+                    agent_array,
 
-                customer_array,
+                customer_audio=
+                    customer_array,
 
-                max_new_tokens,
+                max_new_tokens=
+                    max_new_tokens,
 
-                request_id,
+                request_id=
+                    request_id,
             ),
 
             media_type=
                 "application/x-dia-speaker-stream",
+
+            headers={
+
+                "X-Request-ID":
+                    request_id,
+
+                "X-Sample-Rate":
+                    str(SAMPLE_RATE),
+
+                "X-Chunk-Mode":
+                    "complete-speaker-turn",
+            },
         )
 
 
@@ -1509,14 +1712,13 @@ def tts(
 
 
         raise HTTPException(
-
             status_code=500,
-
             detail=(
-                f"TTS failed: "
-                f"{type(exc).__name__}: {exc}"
+                "Production TTS failed: "
+                f"{type(exc).__name__}: "
+                f"{exc}"
             ),
-        )
+        ) from exc
 
 
 # =============================================================================
@@ -1528,6 +1730,17 @@ def tts_seed(
     req: SeedTTSRequest,
 ):
 
+    if (
+        model is None
+        or processor is None
+    ):
+
+        raise HTTPException(
+            status_code=503,
+            detail="Model is not loaded yet.",
+        )
+
+
     set_seed(
         req.seed
     )
@@ -1536,17 +1749,13 @@ def tts_seed(
     try:
 
         inputs = processor(
-
             text=[
                 normalize_tags(
                     req.text
                 )
             ],
-
             padding=True,
-
             return_tensors="pt",
-
         ).to(
             model.device
         )
@@ -1555,7 +1764,6 @@ def tts_seed(
         with torch.inference_mode():
 
             outputs = model.generate(
-
                 **inputs,
 
                 max_new_tokens=
@@ -1593,7 +1801,6 @@ def tts_seed(
 
 
         return Response(
-
             content=
                 buffer.getvalue(),
 
@@ -1605,11 +1812,10 @@ def tts_seed(
     except Exception as exc:
 
         raise HTTPException(
-
             status_code=500,
-
             detail=(
-                f"Seed TTS failed: "
-                f"{type(exc).__name__}: {exc}"
+                "Seed TTS failed: "
+                f"{type(exc).__name__}: "
+                f"{exc}"
             ),
-        )
+        ) from exc
