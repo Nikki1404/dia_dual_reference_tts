@@ -1,0 +1,6 @@
+requests
+numpy
+soundfile
+sounddevice
+librosa
+scipy
