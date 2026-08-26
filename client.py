@@ -15,10 +15,10 @@ import soundfile as sf
 
 
 # =============================================================================
-# FILE HELPERS
+# TEXT
 # =============================================================================
 
-def read_text_file(path_value: str) -> str:
+def read_text_file(path_value):
 
     path = Path(path_value)
 
@@ -35,81 +35,48 @@ def read_text_file(path_value: str) -> str:
     ).strip()
 
 
-def resolve_main_text(args) -> str:
+def resolve_text(args):
 
-    if args.text is not None:
+    if args.text:
 
-        value = args.text.strip()
+        return args.text.strip()
 
-    elif args.text_file is not None:
-
-        value = read_text_file(
-            args.text_file
-        )
-
-    else:
-
-        print(
-            "Provide --text or --text-file."
-        )
-
-        sys.exit(1)
-
-    if not value:
-
-        print(
-            "Input text is empty."
-        )
-
-        sys.exit(1)
-
-    return value
+    return read_text_file(
+        args.text_file
+    )
 
 
 def resolve_reference_text(
-    direct_value,
-    file_value,
+    direct,
+    file_path,
     name,
-) -> str:
+):
 
-    if direct_value is not None:
+    if direct:
 
-        value = direct_value.strip()
+        return direct.strip()
 
-    elif file_value is not None:
+    if file_path:
 
-        value = read_text_file(
-            file_value
+        return read_text_file(
+            file_path
         )
 
-    else:
+    print(
+        f"Missing {name} reference text"
+    )
 
-        print(
-            f"Production mode requires "
-            f"{name} reference text."
-        )
-
-        sys.exit(1)
-
-    if not value:
-
-        print(
-            f"{name} reference text is empty."
-        )
-
-        sys.exit(1)
-
-    return value
+    sys.exit(1)
 
 
 # =============================================================================
-# STREAM HELPERS
+# STREAM
 # =============================================================================
 
 def receive_exact(
     raw,
-    size: int,
-) -> bytes:
+    size,
+):
 
     data = bytearray()
 
@@ -122,16 +89,12 @@ def receive_exact(
         if not part:
 
             raise EOFError(
-                "Server stream ended unexpectedly."
+                "Stream ended unexpectedly"
             )
 
-        data.extend(
-            part
-        )
+        data.extend(part)
 
-    return bytes(
-        data
-    )
+    return bytes(data)
 
 
 def read_frame(raw):
@@ -144,6 +107,7 @@ def read_frame(raw):
         ),
     )[0]
 
+
     metadata = json.loads(
         receive_exact(
             raw,
@@ -153,6 +117,7 @@ def read_frame(raw):
         )
     )
 
+
     pcm_size = struct.unpack(
         ">Q",
         receive_exact(
@@ -161,19 +126,99 @@ def read_frame(raw):
         ),
     )[0]
 
-    pcm_bytes = b""
 
-    if pcm_size > 0:
-
-        pcm_bytes = receive_exact(
+    pcm = (
+        receive_exact(
             raw,
             pcm_size,
         )
+        if pcm_size
+        else b""
+    )
+
 
     return (
         metadata,
-        pcm_bytes,
+        pcm,
     )
+
+
+# =============================================================================
+# TRIM EDGE SILENCE
+# =============================================================================
+
+def trim_chunk_silence(
+    audio,
+    sample_rate,
+    threshold_db=-45.0,
+    padding_ms=8.0,
+):
+
+    if len(audio) == 0:
+
+        return audio
+
+
+    peak = float(
+        np.max(
+            np.abs(audio)
+        )
+    )
+
+
+    if peak <= 1e-8:
+
+        return audio
+
+
+    threshold = (
+        peak
+        * (
+            10.0
+            ** (
+                threshold_db
+                / 20.0
+            )
+        )
+    )
+
+
+    active = np.flatnonzero(
+        np.abs(audio)
+        >= threshold
+    )
+
+
+    if len(active) == 0:
+
+        return audio
+
+
+    padding = int(
+        sample_rate
+        * padding_ms
+        / 1000
+    )
+
+
+    start = max(
+        0,
+        int(active[0])
+        - padding,
+    )
+
+
+    end = min(
+        len(audio),
+        int(active[-1])
+        + padding
+        + 1,
+    )
+
+
+    return audio[
+        start:end
+    ]
 
 
 # =============================================================================
@@ -181,32 +226,26 @@ def read_frame(raw):
 # =============================================================================
 
 def adjust_speed(
-    audio: np.ndarray,
-    speed: float,
-) -> np.ndarray:
+    audio,
+    speed,
+):
 
     if speed == 1.0:
 
         return audio
 
+
     try:
 
         import librosa
 
-        return (
-            librosa.effects
-            .time_stretch(
-                audio,
-                rate=speed,
-            )
+        return librosa.effects.time_stretch(
+            audio,
+            rate=speed,
         )
 
-    except Exception as exc:
 
-        print(
-            f"[WARN] Speed adjustment failed: "
-            f"{exc}"
-        )
+    except Exception:
 
         return audio
 
@@ -217,7 +256,7 @@ def adjust_speed(
 
 def run_seed_mode(
     args,
-    text: str,
+    text,
 ):
 
     url = (
@@ -225,20 +264,6 @@ def run_seed_mode(
         + "/tts_seed"
     )
 
-    output_path = Path(
-        args.output
-    )
-
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    max_new_tokens = (
-        args.max_new_tokens
-        if args.max_new_tokens is not None
-        else 1024
-    )
 
     payload = {
 
@@ -249,254 +274,58 @@ def run_seed_mode(
             args.seed,
 
         "max_new_tokens":
-            max_new_tokens,
+            args.max_new_tokens
+            or 1024,
     }
 
 
-    print("")
-    print("=" * 80)
-    print("DIA SEED TEST MODE")
-    print("=" * 80)
-
-    print(
-        f"Server            : "
-        f"{url}"
+    response = requests.post(
+        url,
+        json=payload,
+        timeout=args.timeout,
     )
-
-    print(
-        f"Seed              : "
-        f"{args.seed}"
-    )
-
-    print(
-        f"Words             : "
-        f"{len(text.split())}"
-    )
-
-    print(
-        f"Max new tokens    : "
-        f"{max_new_tokens}"
-    )
-
-    print(
-        f"Output            : "
-        f"{output_path}"
-    )
-
-    print(
-        f"Play              : "
-        f"{args.play}"
-    )
-
-    print("=" * 80)
-
-
-    started = (
-        time.perf_counter()
-    )
-
-
-    session = requests.Session()
-
-    # Prevent localhost from accidentally going
-    # through configured corporate proxy.
-    session.trust_env = False
-
-
-    try:
-
-        response = session.post(
-            url,
-            json=payload,
-            timeout=args.timeout,
-        )
-
-    except requests.RequestException as exc:
-
-        print(
-            f"Request failed: "
-            f"{exc}"
-        )
-
-        session.close()
-
-        sys.exit(1)
 
 
     if response.status_code != 200:
 
         print(
-            f"Request failed "
-            f"({response.status_code}): "
-            f"{response.text}"
+            response.text
         )
-
-        session.close()
 
         sys.exit(1)
 
 
-    output_path.write_bytes(
+    Path(
+        args.output
+    ).write_bytes(
         response.content
     )
 
 
-    total_ms = (
-        time.perf_counter()
-        - started
-    ) * 1000
-
-
-    print("")
-    print("=" * 80)
-    print("SEED RESULT")
-    print("=" * 80)
-
     print(
-        f"Seed              : "
-        f"{args.seed}"
+        f"Saved: {args.output}"
     )
-
-    print(
-        f"Saved             : "
-        f"{output_path}"
-    )
-
-    print(
-        f"Client total      : "
-        f"{total_ms:.2f} ms"
-    )
-
-    print(
-        f"Server preprocess : "
-        f"{response.headers.get('X-Preprocess-Time-MS', '0')} ms"
-    )
-
-    print(
-        f"Server inference  : "
-        f"{response.headers.get('X-Inference-Time-MS', '0')} ms"
-    )
-
-    print(
-        f"Server decode     : "
-        f"{response.headers.get('X-Decode-Time-MS', '0')} ms"
-    )
-
-    print(
-        f"Server total      : "
-        f"{response.headers.get('X-Server-Total-MS', '0')} ms"
-    )
-
-    print(
-        f"Audio duration    : "
-        f"{response.headers.get('X-Audio-Duration-S', '0')} sec"
-    )
-
-    print("=" * 80)
-
-
-    if args.play:
-
-        try:
-
-            import sounddevice as sd
-
-            audio, sr = sf.read(
-                str(output_path),
-                dtype="float32",
-            )
-
-            audio = adjust_speed(
-                audio,
-                args.speed,
-            )
-
-            print("")
-            print(
-                f"[PLAY] Playing seed "
-                f"{args.seed}"
-            )
-
-            sd.play(
-                audio,
-                sr,
-            )
-
-            sd.wait()
-
-            print(
-                "[PLAY] Finished"
-            )
-
-        except Exception as exc:
-
-            print(
-                f"Playback failed: "
-                f"{exc}"
-            )
-
-
-    session.close()
 
 
 # =============================================================================
-# PRODUCTION MODE
+# PRODUCTION
 # =============================================================================
 
-def run_production_mode(
+def run_production(
     args,
-    text: str,
+    text,
 ):
 
-    # =========================================================================
-    # VALIDATE REFERENCES
-    # =========================================================================
-
-    if not args.agent_audio:
-
-        print(
-            "Production mode requires "
-            "--agent-audio."
-        )
-
-        sys.exit(1)
-
-
-    if not args.customer_audio:
-
-        print(
-            "Production mode requires "
-            "--customer-audio."
-        )
-
-        sys.exit(1)
-
-
-    agent_audio_path = Path(
+    agent_audio = Path(
         args.agent_audio
     )
 
-    customer_audio_path = Path(
+    customer_audio = Path(
         args.customer_audio
     )
 
 
-    for path in (
-        agent_audio_path,
-        customer_audio_path,
-    ):
-
-        if not path.exists():
-
-            print(
-                f"File not found: "
-                f"{path}"
-            )
-
-            sys.exit(1)
-
-
-    agent_reference_text = (
+    agent_text = (
         resolve_reference_text(
             args.agent_text,
             args.agent_text_file,
@@ -505,43 +334,12 @@ def run_production_mode(
     )
 
 
-    customer_reference_text = (
+    customer_text = (
         resolve_reference_text(
             args.customer_text,
             args.customer_text_file,
             "customer",
         )
-    )
-
-
-    max_new_tokens = (
-        args.max_new_tokens
-        if args.max_new_tokens is not None
-        else 3072
-    )
-
-
-    if not (
-        5
-        <= args.chunk_words
-        <= 100
-    ):
-
-        print(
-            "--chunk-words must be "
-            "between 5 and 100."
-        )
-
-        sys.exit(1)
-
-
-    output_path = Path(
-        args.output
-    )
-
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
     )
 
 
@@ -551,291 +349,149 @@ def run_production_mode(
     )
 
 
-    print("")
-    print("=" * 80)
-    print("DIA PRODUCTION TTS")
-    print("=" * 80)
-
-    print(
-        f"Server            : "
-        f"{url}"
-    )
-
-    print(
-        f"Input words       : "
-        f"{len(text.split())}"
-    )
-
-    print(
-        f"Chunk words       : "
-        f"{args.chunk_words}"
-    )
-
-    print(
-        f"Agent WAV         : "
-        f"{agent_audio_path}"
-    )
-
-    print(
-        f"Customer WAV      : "
-        f"{customer_audio_path}"
-    )
-
-    print(
-        f"Max new tokens    : "
-        f"{max_new_tokens}"
-    )
-
-    print(
-        f"Output            : "
-        f"{output_path}"
-    )
-
-    print(
-        f"Play              : "
-        f"{args.play}"
-    )
-
-    print(
-        f"Speed             : "
-        f"{args.speed}"
-    )
-
-    print("=" * 80)
-
-
-    # =========================================================================
-    # PLAYBACK QUEUE
-    #
-    # IMPORTANT:
-    #
-    # New word-based chunks may contain BOTH:
-    #
-    # [S1] ...
-    # [S2] ...
-    #
-    # Therefore there is NO single metadata["speaker"] anymore.
-    # =========================================================================
-
-    playback_queue = (
-        queue.Queue()
-    )
-
-    playback_enabled = False
-
-    playback_thread = None
+    playback_queue = queue.Queue()
 
 
     if args.play:
 
-        try:
-
-            import sounddevice as sd
-
-            playback_enabled = True
+        import sounddevice as sd
 
 
-            def playback_worker():
+        def playback_worker():
 
-                while True:
+            while True:
 
-                    item = (
-                        playback_queue.get()
-                    )
-
-
-                    if item is None:
-
-                        playback_queue.task_done()
-
-                        break
+                item = (
+                    playback_queue.get()
+                )
 
 
-                    (
-                        chunk_index,
-                        chunk_count,
-                        audio,
-                        sample_rate,
-                    ) = item
-
-
-                    playback_audio = (
-                        adjust_speed(
-                            audio,
-                            args.speed,
-                        )
-                    )
-
-
-                    print("")
-                    print(
-                        f"[PLAY] Starting chunk "
-                        f"{chunk_index}/"
-                        f"{chunk_count}"
-                    )
-
-
-                    sd.play(
-                        playback_audio,
-                        sample_rate,
-                    )
-
-
-                    # Strict sequential playback:
-                    #
-                    # chunk N+1 is not played
-                    # until chunk N finishes.
-                    sd.wait()
-
-
-                    print(
-                        f"[PLAY] Finished chunk "
-                        f"{chunk_index}/"
-                        f"{chunk_count}"
-                    )
-
+                if item is None:
 
                     playback_queue.task_done()
 
+                    break
 
-            playback_thread = (
-                threading.Thread(
-                    target=
-                        playback_worker,
-                    daemon=True,
+
+                (
+                    index,
+                    count,
+                    speaker,
+                    voice,
+                    audio,
+                    sr,
+                ) = item
+
+
+                print(
+                    f"[PLAY] "
+                    f"{index}/{count} "
+                    f"{speaker} ({voice})"
                 )
-            )
 
 
-            playback_thread.start()
+                sd.play(
+                    adjust_speed(
+                        audio,
+                        args.speed,
+                    ),
+                    sr,
+                )
 
 
-        except Exception as exc:
-
-            print(
-                f"Playback disabled: "
-                f"{exc}"
-            )
-
-            playback_enabled = False
+                # Strictly sequential playback.
+                sd.wait()
 
 
-    # =========================================================================
-    # HTTP REQUEST
-    # =========================================================================
-
-    request_start = (
-        time.perf_counter()
-    )
+                playback_queue.task_done()
 
 
-    session = (
-        requests.Session()
-    )
+        thread = threading.Thread(
+            target=playback_worker,
+            daemon=True,
+        )
 
-    session.trust_env = False
-
-
-    try:
-
-        with (
-            open(
-                agent_audio_path,
-                "rb",
-            ) as agent_handle,
-
-            open(
-                customer_audio_path,
-                "rb",
-            ) as customer_handle,
-        ):
+        thread.start()
 
 
-            files = {
+    with (
+        open(
+            agent_audio,
+            "rb",
+        ) as agent_file,
 
-                "agent_audio": (
-                    agent_audio_path.name,
-                    agent_handle,
-                    "audio/wav",
-                ),
-
-                "customer_audio": (
-                    customer_audio_path.name,
-                    customer_handle,
-                    "audio/wav",
-                ),
-            }
+        open(
+            customer_audio,
+            "rb",
+        ) as customer_file,
+    ):
 
 
-            data = {
+        response = requests.post(
+
+            url,
+
+            data={
 
                 "text":
                     text,
 
                 "agent_reference_text":
-                    agent_reference_text,
+                    agent_text,
 
                 "customer_reference_text":
-                    customer_reference_text,
-
-                "chunk_words":
-                    str(
-                        args.chunk_words
-                    ),
+                    customer_text,
 
                 "max_new_tokens":
                     str(
-                        max_new_tokens
+                        args.max_new_tokens
+                        or 3072
                     ),
-            }
+            },
 
+            files={
 
-            response = session.post(
-                url,
-                data=data,
-                files=files,
-                stream=True,
-                timeout=args.timeout,
-            )
+                "agent_audio": (
+                    agent_audio.name,
+                    agent_file,
+                    "audio/wav",
+                ),
 
+                "customer_audio": (
+                    customer_audio.name,
+                    customer_file,
+                    "audio/wav",
+                ),
+            },
 
-    except requests.RequestException as exc:
+            stream=True,
 
-        session.close()
-
-        print(
-            f"Request failed: "
-            f"{exc}"
+            timeout=
+                args.timeout,
         )
-
-        sys.exit(1)
-
-
-    headers_received = (
-        time.perf_counter()
-    )
 
 
     if response.status_code != 200:
 
         print(
-            f"Request failed "
-            f"({response.status_code}): "
-            f"{response.text}"
+            response.text
         )
-
-        response.close()
-
-        session.close()
 
         sys.exit(1)
 
 
-    # =========================================================================
-    # WAV OUTPUT
-    # =========================================================================
+    output_path = Path(
+        args.output
+    )
 
-    wav_writer = sf.SoundFile(
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+
+    writer = sf.SoundFile(
 
         str(
             output_path
@@ -853,484 +509,191 @@ def run_production_mode(
     )
 
 
-    audio_parts = []
-
-    first_audio_time = None
-
-    chunk_counter = 0
-
-    server_metrics = {}
+    chunk_count = 0
 
 
     try:
 
         while True:
 
-            metadata, pcm_bytes = (
-                read_frame(
-                    response.raw
-                )
+            metadata, pcm_bytes = read_frame(
+                response.raw
             )
 
 
-            frame_type = (
-                metadata.get(
-                    "type"
-                )
-            )
-
-
-            # =================================================================
-            # AUDIO FRAME
-            # =================================================================
-
-            if frame_type == "audio":
-
-                chunk_counter += 1
-
-
-                if first_audio_time is None:
-
-                    first_audio_time = (
-                        time.perf_counter()
-                    )
-
-
-                pcm = np.frombuffer(
-                    pcm_bytes,
-                    dtype="<i2",
-                )
-
-
-                audio = (
-                    pcm.astype(
-                        np.float32
-                    )
-                    / 32767.0
-                )
-
-
-                # =============================================================
-                # Append audio sequentially into ONE WAV.
-                # =============================================================
-
-                wav_writer.write(
-                    audio
-                )
-
-
-                audio_parts.append(
-                    audio.copy()
-                )
-
-
-                print("")
-                print(
-                    f"[RECV] Chunk "
-                    f"{metadata.get('chunk_index')}/"
-                    f"{metadata.get('chunk_count')}"
-                )
-
-
-                print(
-                    f"       Words      : "
-                    f"{metadata.get('chunk_words')}"
-                )
-
-
-                print(
-                    f"       Text       : "
-                    f"{metadata.get('chunk_text')}"
-                )
-
-
-                print(
-                    f"       Duration   : "
-                    f"{metadata.get('audio_duration_s', 0):.2f}s"
-                )
-
-
-                print(
-                    f"       Inference  : "
-                    f"{metadata.get('inference_ms', 0):.2f}ms"
-                )
-
-
-                print(
-                    f"       Min tokens : "
-                    f"{metadata.get('min_new_tokens', 0)}"
-                )
-
-
-                print(
-                    f"       Max tokens : "
-                    f"{metadata.get('local_max_new_tokens', 0)}"
-                )
-
-
-                print(
-                    f"       Retried    : "
-                    f"{metadata.get('retried', False)}"
-                )
-
-
-                # =============================================================
-                # PLAYBACK
-                #
-                # NO metadata["speaker"] here anymore.
-                # =============================================================
-
-                if playback_enabled:
-
-                    playback_queue.put(
-                        (
-                            metadata.get(
-                                "chunk_index"
-                            ),
-
-                            metadata.get(
-                                "chunk_count"
-                            ),
-
-                            audio.copy(),
-
-                            metadata.get(
-                                "sample_rate",
-                                44100,
-                            ),
-                        )
-                    )
-
-
-            # =================================================================
-            # END FRAME
-            # =================================================================
-
-            elif frame_type == "end":
-
-                server_metrics = (
-                    metadata
-                )
+            if metadata.get(
+                "type"
+            ) == "end":
 
                 break
 
 
-            # =================================================================
-            # UNKNOWN FRAME
-            # =================================================================
+            pcm = np.frombuffer(
+                pcm_bytes,
+                dtype="<i2",
+            )
 
-            else:
 
-                print(
-                    f"[WARN] Unknown frame type: "
-                    f"{frame_type}"
+            audio = (
+                pcm.astype(
+                    np.float32
+                )
+                / 32767.0
+            )
+
+
+            sr = int(
+                metadata.get(
+                    "sample_rate",
+                    44100,
+                )
+            )
+
+
+            original_duration = (
+                len(audio)
+                / sr
+            )
+
+
+            # =============================================================
+            # REMOVE ONLY LEADING / TRAILING SILENCE
+            # =============================================================
+
+            if args.trim_silence:
+
+                audio = trim_chunk_silence(
+
+                    audio,
+
+                    sr,
+
+                    threshold_db=
+                        args.trim_threshold_db,
+
+                    padding_ms=
+                        args.trim_padding_ms,
                 )
 
 
-    except EOFError as exc:
-
-        print("")
-        print(
-            f"[ERROR] Stream ended early "
-            f"after {chunk_counter} chunks: "
-            f"{exc}"
-        )
-
-        raise
+            final_duration = (
+                len(audio)
+                / sr
+            )
 
 
-    except Exception as exc:
+            # =============================================================
+            # DIRECT APPEND
+            #
+            # No silence inserted between chunks.
+            # =============================================================
 
-        print("")
-        print(
-            f"[ERROR] Stream receive failed: "
-            f"{type(exc).__name__}: "
-            f"{exc}"
-        )
+            writer.write(
+                audio
+            )
 
-        raise
+
+            chunk_count += 1
+
+
+            print("")
+            print(
+                f"[RECV] "
+                f"{metadata.get('chunk_index')}/"
+                f"{metadata.get('chunk_count')}"
+            )
+
+            print(
+                f"Speaker   : "
+                f"{metadata.get('speaker')} "
+                f"({metadata.get('voice')})"
+            )
+
+            print(
+                f"Text      : "
+                f"{metadata.get('chunk_text')}"
+            )
+
+            print(
+                f"Generated : "
+                f"{original_duration:.2f}s"
+            )
+
+            print(
+                f"Trimmed   : "
+                f"{final_duration:.2f}s"
+            )
+
+            print(
+                f"Min tokens: "
+                f"{metadata.get('min_new_tokens')}"
+            )
+
+            print(
+                f"Max tokens: "
+                f"{metadata.get('local_max_new_tokens')}"
+            )
+
+            print(
+                f"Retry     : "
+                f"{metadata.get('retried')}"
+            )
+
+
+            if args.play:
+
+                playback_queue.put(
+                    (
+
+                        metadata.get(
+                            "chunk_index"
+                        ),
+
+                        metadata.get(
+                            "chunk_count"
+                        ),
+
+                        metadata.get(
+                            "speaker"
+                        ),
+
+                        metadata.get(
+                            "voice"
+                        ),
+
+                        audio.copy(),
+
+                        sr,
+                    )
+                )
 
 
     finally:
 
-        wav_writer.close()
-
-        response.close()
-
-        session.close()
+        writer.close()
 
 
-    receive_complete_time = (
-        time.perf_counter()
-    )
-
-
-    # =========================================================================
-    # WAIT FOR ALL PLAYBACK
-    # =========================================================================
-
-    if playback_enabled:
+    if args.play:
 
         playback_queue.join()
-
 
         playback_queue.put(
             None
         )
 
-
         playback_queue.join()
 
 
-        if playback_thread is not None:
-
-            playback_thread.join(
-                timeout=10
-            )
-
-
-    playback_complete_time = (
-        time.perf_counter()
-    )
-
-
-    # =========================================================================
-    # OPTIONAL SPEED-ADJUSTED FILE
-    # =========================================================================
-
-    adjusted_path = None
-
-
-    if (
-        args.save_adjusted
-        and
-        args.speed != 1.0
-        and
-        audio_parts
-    ):
-
-
-        full_audio = np.concatenate(
-            audio_parts
-        )
-
-
-        adjusted_audio = (
-            adjust_speed(
-                full_audio,
-                args.speed,
-            )
-        )
-
-
-        speed_name = (
-            str(
-                args.speed
-            )
-            .replace(
-                ".",
-                "_",
-            )
-        )
-
-
-        adjusted_path = (
-            output_path.with_name(
-
-                output_path.stem
-
-                + "_speed_"
-
-                + speed_name
-
-                + output_path.suffix
-            )
-        )
-
-
-        sf.write(
-
-            str(
-                adjusted_path
-            ),
-
-            adjusted_audio,
-
-            44100,
-
-            subtype=
-                "PCM_16",
-        )
-
-
-    # =========================================================================
-    # CLIENT METRICS
-    # =========================================================================
-
-    ttfb_ms = (
-        headers_received
-        - request_start
-    ) * 1000
-
-
-    ttfa_ms = (
-
-        (
-            first_audio_time
-            - request_start
-        )
-        * 1000
-
-        if first_audio_time
-        else 0.0
-    )
-
-
-    receive_total_ms = (
-        receive_complete_time
-        - request_start
-    ) * 1000
-
-
-    playback_total_ms = (
-        playback_complete_time
-        - request_start
-    ) * 1000
-
-
     print("")
-    print("=" * 80)
-    print("CLIENT LATENCY")
-    print("=" * 80)
-
-
     print(
-        f"HTTP headers/TTFB : "
-        f"{ttfb_ms:.2f} ms"
-    )
-
-
-    print(
-        f"TTFA / TTFT       : "
-        f"{ttfa_ms:.2f} ms"
-    )
-
-
-    print(
-        f"Receive total     : "
-        f"{receive_total_ms:.2f} ms"
-    )
-
-
-    if args.play:
-
-        print(
-            f"E2E incl playback : "
-            f"{playback_total_ms:.2f} ms"
-        )
-
-
-    print(
-        f"Chunks received   : "
-        f"{chunk_counter}"
-    )
-
-
-    # =========================================================================
-    # SERVER METRICS
-    # =========================================================================
-
-    print("")
-    print("=" * 80)
-    print("SERVER METRICS")
-    print("=" * 80)
-
-
-    print(
-        f"Chunks            : "
-        f"{server_metrics.get('chunk_count', 0)}"
-    )
-
-
-    print(
-        f"Chunk words       : "
-        f"{server_metrics.get('chunk_words', args.chunk_words)}"
-    )
-
-
-    print(
-        f"Preprocess        : "
-        f"{server_metrics.get('preprocess_ms', 0):.2f} ms"
-    )
-
-
-    print(
-        f"Inference         : "
-        f"{server_metrics.get('inference_ms', 0):.2f} ms"
-    )
-
-
-    print(
-        f"Decode            : "
-        f"{server_metrics.get('decode_ms', 0):.2f} ms"
-    )
-
-
-    print(
-        f"Server total      : "
-        f"{server_metrics.get('server_total_ms', 0):.2f} ms"
-    )
-
-
-    print(
-        f"Audio duration    : "
-        f"{server_metrics.get('audio_duration_s', 0):.2f}s"
-    )
-
-
-    print(
-        f"Generation RTF    : "
-        f"{server_metrics.get('generation_rtf', 0):.4f}"
-    )
-
-
-    print(
-        f"Total RTF         : "
-        f"{server_metrics.get('total_rtf', 0):.4f}"
-    )
-
-
-    print(
-        f"GPU peak          : "
-        f"{server_metrics.get('gpu_peak_mb', 0):.2f} MB"
-    )
-
-
-    # =========================================================================
-    # OUTPUT
-    # =========================================================================
-
-    print("")
-    print("=" * 80)
-    print("OUTPUT")
-    print("=" * 80)
-
-
-    print(
-        f"WAV               : "
+        f"Saved final WAV: "
         f"{output_path}"
     )
 
-
-    if adjusted_path is not None:
-
-        print(
-            f"Adjusted WAV      : "
-            f"{adjusted_path}"
-        )
-
-
-    print("=" * 80)
+    print(
+        f"Chunks appended: "
+        f"{chunk_count}"
+    )
 
 
 # =============================================================================
@@ -1339,29 +702,15 @@ def run_production_mode(
 
 def main():
 
-    parser = argparse.ArgumentParser(
-
-        description=(
-
-            "Dia TTS client supporting "
-            "seed auditioning and "
-            "word-chunk dual-reference production TTS."
-        )
-    )
+    parser = argparse.ArgumentParser()
 
 
     parser.add_argument(
-
         "--server",
-
         default=
             "http://localhost:8000",
     )
 
-
-    # =========================================================================
-    # TEXT INPUT
-    # =========================================================================
 
     input_group = (
         parser.add_mutually_exclusive_group(
@@ -1371,222 +720,114 @@ def main():
 
 
     input_group.add_argument(
-
-        "--text",
-
-        help=
-            "Direct [S1]/[S2] text",
+        "--text"
     )
 
 
     input_group.add_argument(
-
-        "--text-file",
-
-        help=
-            "TXT file containing [S1]/[S2] text",
+        "--text-file"
     )
 
 
-    # =========================================================================
-    # SEED MODE
-    # =========================================================================
-
     parser.add_argument(
-
         "--seed",
-
         type=int,
-
-        default=None,
-    )
-
-
-    # =========================================================================
-    # PRODUCTION REFERENCES
-    # =========================================================================
-
-    parser.add_argument(
-
-        "--agent-audio",
-
         default=None,
     )
 
 
     parser.add_argument(
-
-        "--customer-audio",
-
-        default=None,
+        "--agent-audio"
     )
 
 
     parser.add_argument(
-
-        "--agent-text",
-
-        default=None,
+        "--customer-audio"
     )
 
 
     parser.add_argument(
-
-        "--agent-text-file",
-
-        default=None,
+        "--agent-text"
     )
 
 
     parser.add_argument(
-
-        "--customer-text",
-
-        default=None,
+        "--agent-text-file"
     )
 
 
     parser.add_argument(
-
-        "--customer-text-file",
-
-        default=None,
+        "--customer-text"
     )
 
 
-    # =========================================================================
-    # CHUNK SIZE
-    #
-    # This now controls chunk boundaries.
-    #
-    # Example:
-    #
-    # --chunk-words 30
-    # =========================================================================
-
     parser.add_argument(
-
-        "--chunk-words",
-
-        type=int,
-
-        default=30,
-
-        help=(
-            "Approximate transcript words "
-            "per production generation chunk. "
-            "Speaker changes do NOT force a chunk boundary."
-        ),
+        "--customer-text-file"
     )
 
 
-    # =========================================================================
-    # GENERATION
-    # =========================================================================
-
     parser.add_argument(
-
         "--max-new-tokens",
-
         type=int,
-
         default=None,
     )
 
 
-    # =========================================================================
-    # OUTPUT
-    # =========================================================================
-
     parser.add_argument(
-
         "--output",
-
-        default=
-            "output.wav",
+        default="output.wav",
     )
 
 
     parser.add_argument(
-
         "--play",
-
-        action=
-            "store_true",
+        action="store_true",
     )
 
 
     parser.add_argument(
-
         "--speed",
-
         type=float,
-
         default=1.0,
     )
 
 
     parser.add_argument(
-
-        "--save-adjusted",
-
+        "--trim-silence",
         action=
-            "store_true",
+            argparse.BooleanOptionalAction,
+        default=True,
     )
 
 
     parser.add_argument(
-
-        "--timeout",
-
+        "--trim-threshold-db",
         type=float,
+        default=-45.0,
+    )
 
-        default=1800.0,
+
+    parser.add_argument(
+        "--trim-padding-ms",
+        type=float,
+        default=8.0,
+    )
+
+
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=1800,
     )
 
 
     args = parser.parse_args()
 
 
-    # =========================================================================
-    # VALIDATION
-    # =========================================================================
-
-    if args.speed <= 0:
-
-        print(
-            "--speed must be greater than 0"
-        )
-
-        sys.exit(1)
-
-
-    if not (
-        5
-        <= args.chunk_words
-        <= 100
-    ):
-
-        print(
-            "--chunk-words must be "
-            "between 5 and 100"
-        )
-
-        sys.exit(1)
-
-
-    # =========================================================================
-    # INPUT
-    # =========================================================================
-
-    text = resolve_main_text(
+    text = resolve_text(
         args
     )
 
-
-    # =========================================================================
-    # MODE
-    # =========================================================================
 
     if args.seed is not None:
 
@@ -1597,7 +838,7 @@ def main():
 
     else:
 
-        run_production_mode(
+        run_production(
             args,
             text,
         )
