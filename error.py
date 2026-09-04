@@ -80,4 +80,11 @@ systemctl restart docker
 
 docker info | grep -i proxy
 
+(base) root@EC03-E01-AICOE1:/home/CORP/re_nikitav# docker info | grep -i proxy
+ HTTP Proxy: http://163.116.128.80:8080
+ HTTPS Proxy: http://163.116.128.80:8080
+ No Proxy: localhost,127.0.0.1,169.254.169.254,metadata.google.internal,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,.docker.io
+  EnableUserlandProxy: true
+  UserlandProxyPath: /usr/bin/docker-proxy
+
 docker pull nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
