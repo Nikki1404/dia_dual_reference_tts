@@ -21,3 +21,6 @@ ERROR: failed to build: failed to solve: DeadlineExceeded: nvidia/cuda:12.4.1-cu
 * Failed to connect to 163.116.128.80 port 8080: Connection timed out
 * Closing connection 0
 curl: (28) Failed to connect to 163.116.128.80 port 8080: Connection timed out
+
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+curl -v https://registry-1.docker.io/v2/
