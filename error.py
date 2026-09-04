@@ -87,4 +87,18 @@ docker info | grep -i proxy
   EnableUserlandProxy: true
   UserlandProxyPath: /usr/bin/docker-proxy
 
-docker pull nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+(base) root@EC03-E01-AICOE1:/home/CORP/re_nikitav# docker pull nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+12.4.1-cudnn-runtime-ubuntu22.04: Pulling from nvidia/cuda
+3c645031de29: Already exists
+0d6448aff889: Already exists
+0a7674e3e8fe: Already exists
+b71b637b97c5: Already exists
+56dc85502937: Already exists
+ec6d5f6c9ed9: Already exists
+47b8539d532f: Already exists
+fd9cc1ad8dee: Already exists
+83525caeeb35: Already exists
+bdf5eb4fd32c: Already exists
+Digest: sha256:2fcc4280646484290cc50dce5e65f388dd04352b07cbe89a635703bd1f9aedb6
+Status: Downloaded newer image for nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+docker.io/nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
