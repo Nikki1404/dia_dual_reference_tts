@@ -1,0 +1,396 @@
+PYTHON FUNDAMENTALS - INDIVIDUAL ASSIGNMENT
+
+    CONCEPTS YOU ARE EXPECTED TO DEMONSTRATE
+
+    Variables and basic data types: str, int, float, bool and None.
+    Operators and conditional statements: if, elif and else.
+    Loops: for and/or while where appropriate.
+    String operations and common string methods.
+    Collections: lists, dictionaries, sets and tuples where they naturally fit the requirement.
+    Functions with meaningful parameters and return values.
+    At least one function with a default parameter.
+    Use of *args or **kwargs at least once where it can be reasonably demonstrated.
+    At least one list, set, or dictionary comprehension.
+    Useful built-ins such as enumerate(), zip(), sorted(), min(), max(), sum(), any() or all() where appropriate.
+    Exception handling using try, except, else and/or finally where appropriate.
+    Raising an exception for invalid business input using raise.
+    At least one custom exception class.
+    Modules and imports.
+    File handling using with.
+    JSON data persistence.
+    Use of pathlib for file paths.
+    Virtual environment creation and activation.
+    Package installation and management using pip.
+    A requirements.txt file.
+    Logging using DEBUG, INFO, WARNING and ERROR appropriately.
+    A main() function and if __name__ == '__main__': entry point.
+    Basic type hints on important functions.
+    Docstrings for important functions/modules.
+    Readable naming, separation of responsibilities and clean project structure.
+
+    IMPORTANT:
+    Do not force a Python feature into a place where it makes no sense. The purpose is to demonstrate that you understand the feature and can use it appropriately. During review, you should be able to show where each required concept has been used and explain why.
+
+
+    TASK 1 - PERSONAL EXPENSE TRACKER CLI
+
+    Create a command-line Personal Expense Tracker that allows a user to add, view, search, summarize, delete, save and reload expense records.
+
+    EXPENSE DATA
+
+    {
+        "id": 1,
+        "category": "Food",
+        "amount": 250.50,
+        "description": "Lunch",
+        "date": "2026-09-04",
+        "tags": ["office", "meal"]
+    }
+
+    REQUIRED MENU
+
+    =============================
+           EXPENSE TRACKER
+    =============================
+    1. Add Expense
+    2. View All Expenses
+    3. Search Expenses
+    4. Filter by Category
+    5. Calculate Total Expense
+    6. Category-wise Summary
+    7. Highest Expense
+    8. Delete Expense
+    9. Save Data
+    10. Exit
+
+
+    FUNCTIONAL REQUIREMENTS
+
+    1. Load previously saved expenses from data/expenses.json when the application starts. If the file does not exist, start with an empty collection without crashing.
+    2. Allow a user to add an expense containing category, amount, description, date and one or more tags.
+    3. Generate a unique numeric ID for each expense.
+    4. Store the active expense data as a list of dictionaries.
+    5. Display all expenses clearly.
+    6. Search expenses using text entered by the user. The search should be case-insensitive and should be able to match useful textual fields such as category or description.
+    7. Filter expenses by category.
+    8. Calculate the total amount of all expenses.
+    9. Generate category-wise totals using an appropriate dictionary.
+    10. Find and display the highest expense.
+    11. Delete an expense by ID.
+    12. Use a set somewhere meaningful, for example to derive unique categories or unique tags.
+    13. Use a tuple somewhere meaningful, for example for supported menu choices, fixed field names or another fixed collection.
+    14. Use at least one comprehension.
+    15. Use sorted() with a key function to provide at least one useful sorted view, for example highest-to-lowest amount.
+    16. Save the latest expense data to JSON.
+    17. The program must continue until the user explicitly chooses Exit.
+    18. When exiting, ensure the latest valid data is saved.
+
+
+    MANDATORY FUNCTION DESIGN
+
+    Your solution must be function-oriented. At minimum, your application should have responsibilities equivalent to:
+
+    - load_expenses(...)
+    - save_expenses(...)
+    - generate_expense_id(...)
+    - add_expense(...)
+    - validate_amount(...)
+    - search_expenses(...)
+    - filter_by_category(...)
+    - calculate_total(...)
+    - category_summary(...)
+    - find_highest_expense(...)
+    - delete_expense(...)
+    - display_expenses(...)
+    - main(...)
+
+    You must decide the exact parameters, return values and internal implementation.
+
+    Additional requirements:
+    - Important functions must use type hints.
+    - Important functions must contain docstrings.
+    - At least one function must use a default parameter.
+    - Demonstrate *args or **kwargs once in a sensible helper/reporting function.
+
+
+    VALIDATION AND EXCEPTION HANDLING
+
+    - Amount must be numeric and greater than zero.
+    - Category cannot be empty.
+    - Description cannot be empty.
+    - Expense ID must be valid.
+    - Deleting a missing Expense ID must be handled gracefully.
+    - Invalid menu choices must not terminate the program.
+    - Invalid or malformed JSON must not cause an uncontrolled application crash.
+    - Use raise for at least one validation/business rule.
+    - Create and use at least one custom exception, for example InvalidExpenseError.
+    - Use specific exceptions rather than a blanket except wherever possible.
+    - Log unexpected errors with useful context.
+
+
+    REQUIRED PROJECT STRUCTURE
+
+    expense_tracker/
+    |
+    |-- main.py
+    |-- expense_manager.py
+    |-- validators.py
+    |-- file_handler.py
+    |-- logger_config.py
+    |-- exceptions.py
+    |-- requirements.txt
+    |-- README.md
+    |
+    |-- data/
+    |   `-- expenses.json
+    |
+    `-- logs/
+        `-- app.log
+
+
+    LOGGING REQUIREMENTS
+
+    Configure logging in logger_config.py. The application should log meaningful events instead of using print() for internal diagnostics. print() is still appropriate for information shown to the CLI user.
+
+    DEBUG - useful diagnostic details.
+    INFO - application start/stop, successful add/delete/save/load operations.
+    WARNING - invalid user input or recoverable situations.
+    ERROR - failed file operations, malformed data or unexpected application errors.
+
+
+    TASK 2 - EMPLOYEE DATA ANALYZER AND MANAGEMENT CLI
+
+    Create a modular Employee Data Analyzer that manages employee information, performs department-level analysis and persists the data to JSON.
+
+    STARTER DATA
+
+    employees = [
+        {"id": 101, "name": "Amit", "department": "Engineering", "salary": 55000, "experience": 2, "skills": ["Python", "Git"]},
+        {"id": 102, "name": "Neha", "department": "HR", "salary": 48000, "experience": 3, "skills": ["Recruitment", "Excel"]},
+        {"id": 103, "name": "Rahul", "department": "Engineering", "salary": 72000, "experience": 5, "skills": ["Python", "GCP"]},
+        {"id": 104, "name": "Priya", "department": "Finance", "salary": 65000, "experience": 4, "skills": ["Excel", "Reporting"]},
+        {"id": 105, "name": "Arjun", "department": "Engineering", "salary": 62000, "experience": 3, "skills": ["Python", "SQL"]}
+    ]
+
+
+    REQUIRED MENU
+
+    ================================
+           EMPLOYEE ANALYZER
+    ================================
+    1. View All Employees
+    2. Search Employee
+    3. Filter by Department
+    4. Filter by Skill
+    5. Highest Paid Employee
+    6. Average Salary
+    7. Department-wise Statistics
+    8. Unique Skills Report
+    9. Add Employee
+    10. Remove Employee
+    11. Save Data
+    12. Exit
+
+
+    FUNCTIONAL REQUIREMENTS
+
+    1. Load employee data from data/employees.json. If the file does not exist, initialize it using the provided starter data.
+    2. View all employee records.
+    3. Search by Employee ID or Employee Name.
+    4. Name searches must be case-insensitive.
+    5. Filter employees by department.
+    6. Filter employees by skill.
+    7. Find the highest-paid employee.
+    8. Calculate the overall average salary.
+    9. Generate department-wise statistics containing employee count, average salary, highest salary and average experience.
+    10. Generate a report of unique skills across all employees using a set.
+    11. Add a new employee after validating all fields.
+    12. Prevent duplicate Employee IDs.
+    13. Remove an employee by ID.
+    14. Use a dictionary to build department-wise analytics.
+    15. Use a comprehension for at least one transformation/filtering requirement.
+    16. Use enumerate() in a meaningful display or processing operation.
+    17. Use zip() in at least one reasonable part of the program, for example combining field labels and collected values.
+    18. Use sorted() with key= to provide a salary or experience ranking.
+    19. Save modified employee data to JSON.
+    20. Continue execution until Exit is selected.
+
+
+    MANDATORY FUNCTION DESIGN
+
+    Your application should have function responsibilities equivalent to:
+
+    - load_employees(...)
+    - save_employees(...)
+    - validate_employee(...)
+    - search_employee(...)
+    - filter_by_department(...)
+    - filter_by_skill(...)
+    - find_highest_paid(...)
+    - calculate_average_salary(...)
+    - calculate_department_statistics(...)
+    - get_unique_skills(...)
+    - add_employee(...)
+    - remove_employee(...)
+    - display_employees(...)
+    - main(...)
+
+    You decide the exact signatures and implementation.
+
+    Mandatory:
+    - Type hints on important functions.
+    - Docstrings on important functions.
+    - At least one default parameter.
+    - Demonstrate *args or **kwargs once in a sensible helper/reporting function.
+    - Functions should return useful values where appropriate instead of relying entirely on print().
+
+
+    VALIDATION AND EXCEPTION HANDLING
+
+    - Employee ID must be a valid positive integer.
+    - Employee ID must be unique.
+    - Name and department cannot be empty.
+    - Salary must be numeric and greater than zero.
+    - Experience must be numeric and cannot be negative.
+    - At least one skill should be provided.
+    - Searching/removing a missing employee must be handled cleanly.
+    - Malformed JSON and file access problems must be handled.
+    - Create and use at least one custom exception, for example DuplicateEmployeeError or InvalidEmployeeError.
+    - Use raise for invalid business input.
+    - Use specific exception classes and meaningful messages.
+    - Log errors and warnings appropriately.
+
+
+    REQUIRED PROJECT STRUCTURE
+
+    employee_analyzer/
+    |
+    |-- main.py
+    |-- employee_service.py
+    |-- analytics.py
+    |-- validators.py
+    |-- file_handler.py
+    |-- logger_config.py
+    |-- exceptions.py
+    |-- requirements.txt
+    |-- README.md
+    |
+    |-- data/
+    |   `-- employees.json
+    |
+    `-- logs/
+        `-- app.log
+
+
+    VIRTUAL ENVIRONMENT AND PIP - MANDATORY FOR BOTH TASKS
+
+    Each project must be run inside its own Python virtual environment.
+
+    Create:
+    python -m venv venv
+
+    Activate on Windows:
+    venv\Scripts\activate
+
+    Activate on Linux/macOS:
+    source venv/bin/activate
+
+    Install tabulate as the allowed third-party package for formatted CLI tables. The core business logic must still be written by you.
+
+    pip install tabulate
+
+    Create dependency file:
+    pip freeze > requirements.txt
+
+    A reviewer should be able to recreate the environment using:
+    pip install -r requirements.txt
+
+
+    IMPORTANT RESTRICTIONS
+
+    - Do not use Pandas or NumPy.
+    - Do not use Flask, FastAPI, Django or any web framework.
+    - Do not use a database.
+    - Do not use external packages to implement the business logic.
+    - tabulate is allowed only for formatting terminal output.
+    - Do not implement the entire solution in main.py.
+    - Do not use hard-coded final outputs.
+    - Do not use 'except: pass'.
+    - Do not submit the venv folder.
+    - OOP/classes are not mandatory for these two tasks; OOP will be handled as a dedicated learning topic.
+    - Every submitted line should be something you can explain during review.
+
+
+    README.MD REQUIREMENTS
+
+    - Project purpose and short description.
+    - Features implemented.
+    - Project folder structure.
+    - Python version used.
+    - How to create and activate the virtual environment.
+    - How to install dependencies.
+    - How to run the application.
+    - Where application data is stored.
+    - Where logs are generated.
+    - Exception handling approach.
+    - Any assumptions made.
+    - Any optional improvements implemented.
+
+
+    PYTHON CONCEPT CHECKLIST - COMPLETE FOR EACH TASK
+
+    At the end of your README, add a section called 'Python Concepts Used'. For each item below, mention the file/function where you used it and briefly explain why it was used.
+
+    - Variables/data types
+    - Conditions
+    - Loops
+    - Strings
+    - List
+    - Dictionary
+    - Set
+    - Tuple
+    - Functions
+    - Default parameter
+    - *args or **kwargs
+    - Comprehension
+    - enumerate()
+    - zip()
+    - sorted()/key
+    - Exception handling
+    - raise
+    - Custom exception
+    - Modules/imports
+    - File handling
+    - JSON
+    - pathlib
+    - Logging
+    - Virtual environment
+    - pip/requirements.txt
+    - Type hints
+    - Docstrings
+    - main() and __name__ entry point
+
+
+    SUBMISSION
+
+    1. Submit Task 1 as a complete project folder.
+    2. Submit Task 2 as a complete project folder.
+    3. Include all Python modules, README.md, requirements.txt, JSON data file and generated log file.
+    4. Do not include the virtual environment folder.
+    5. For now, complete and submit locally.
+
+
+    WHAT I WILL REVIEW
+
+    - Whether the application works correctly.
+    - Whether functions are designed and used properly.
+    - Whether functions return values appropriately instead of putting all logic inside print statements.
+    - Choice and use of Python collections.
+    - Input validation and exception handling.
+    - Ability to handle edge cases.
+    - Module separation and project organization.
+    - JSON/file handling.
+    - Logging quality and appropriate log levels.
+    - Virtual environment and dependency management.
+    - Readability, naming and duplication.
+    - Whether you can explain your approach and every major part of your implementation.
