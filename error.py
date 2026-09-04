@@ -66,3 +66,7 @@ curl -v https://registry-1.docker.io/v2/
 <
 {"errors":[{"code":"UNAUTHORIZED","message":"authentication required","detail":null}]}
 * Connection #0 to host registry-1.docker.io left intact
+
+
+(base) root@EC03-E01-AICOE1:/home/CORP/re_nikitav/dia_dual_reference_tts# systemctl show docker --property=Environment
+Environment=HTTP_PROXY=http://163.116.128.80:8080 HTTPS_PROXY=http://163.116.128.80:8080 NO_PROXY=localhost,127.0.0.1,169.254.169.254,metadata.google.internal
