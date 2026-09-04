@@ -68,11 +68,16 @@ curl -v https://registry-1.docker.io/v2/
 * Connection #0 to host registry-1.docker.io left intact
 
 
-(base) root@EC03-E01-AICOE1:/home/CORP/re_nikitav/dia_dual_reference_tts# docker info | grep -i proxy
- HTTP Proxy: http://163.116.128.80:8080
- HTTPS Proxy: http://163.116.128.80:8080
- No Proxy: localhost,127.0.0.1,169.254.169.254,metadata.google.internal
-  EnableUserlandProxy: true
-  UserlandProxyPath: /usr/bin/docker-proxy
-(base) root@EC03-E01-AICOE1:/home/CORP/re_nikitav/dia_dual_reference_tts# systemctl show docker --property=Environment
-Environment=HTTP_PROXY=http://163.116.128.80:8080 HTTPS_PROXY=http://163.116.128.80:8080 NO_PROXY=localhost,127.0.0.1,169.254.169.254,metadata.google.internal
+cat > /etc/systemd/system/docker.service.d/http-proxy.conf <<'EOF'
+[Service]
+Environment="HTTP_PROXY=http://163.116.128.80:8080"
+Environment="HTTPS_PROXY=http://163.116.128.80:8080"
+Environment="NO_PROXY=localhost,127.0.0.1,169.254.169.254,metadata.google.internal,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,.docker.io"
+EOF
+
+systemctl daemon-reload
+systemctl restart docker
+
+docker info | grep -i proxy
+
+docker pull nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
